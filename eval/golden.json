@@ -1,0 +1,302 @@
+{
+  "project": "eval/acme-shop",
+  "memories": [
+    {
+      "kind": "overview",
+      "title": "Acme Shop API overview",
+      "tags": ["stack"],
+      "paths": [],
+      "pinned": true,
+      "body": "Acme Shop API is the TypeScript backend for the Acme storefront. Fastify HTTP server, Postgres through Prisma, Redis for carts and queues, Stripe for payments. Deployed to Fly.io as two processes: the API (src/server.ts) and a job worker (src/worker.ts)."
+    },
+    {
+      "kind": "architecture",
+      "title": "Request flow: routes → services → repositories",
+      "tags": ["layering"],
+      "paths": ["src/routes", "src/services", "src/repositories"],
+      "body": "Routes only validate input and shape responses. Business rules live in services. Only repositories talk to Prisma. Routes must never import the Prisma client directly; the lint rule no-restricted-imports enforces this."
+    },
+    {
+      "kind": "convention",
+      "title": "Money is stored as integer cents",
+      "tags": ["money"],
+      "paths": ["src/lib/money.ts"],
+      "body": "Prices, totals and refunds are integers in the smallest currency unit (cents). Never use floats for money. Use the Money helper in src/lib/money.ts for arithmetic and formatting; it rounds half-even."
+    },
+    {
+      "kind": "gotcha",
+      "title": "Stripe webhooks need the raw request body",
+      "tags": ["stripe", "webhooks"],
+      "paths": ["src/routes/webhooks/stripe.ts"],
+      "body": "Stripe signature verification hashes the exact raw bytes. Fastify parses JSON by default, which breaks the signature. The webhook route registers its own content-type parser that keeps the raw Buffer. If you see 'No signatures found matching the expected signature', the body was parsed before verification."
+    },
+    {
+      "kind": "howto",
+      "title": "Run the test suite locally",
+      "tags": ["testing"],
+      "paths": ["docker-compose.yml"],
+      "body": "Start dependencies with `docker compose up -d postgres redis`, then `npm test`. Integration tests connect to TEST_DATABASE_URL and truncate tables between tests, so never point it at a real database."
+    },
+    {
+      "kind": "reference",
+      "title": "Environment variables",
+      "tags": ["config"],
+      "paths": [".env.example", "src/config.ts"],
+      "body": "DATABASE_URL (Postgres), REDIS_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SENTRY_DSN, JWT_SECRET, TAXJAR_API_KEY. All are validated at boot by src/config.ts; a missing variable crashes startup with a list of what is absent."
+    },
+    {
+      "kind": "decision",
+      "title": "Fastify chosen over Express",
+      "tags": ["framework"],
+      "paths": [],
+      "body": "We picked Fastify for built-in JSON schema validation, typed plugin encapsulation and roughly 2x the throughput of Express in our load tests. Express middleware is not compatible; use Fastify plugins."
+    },
+    {
+      "kind": "gotcha",
+      "title": "Never hand-edit generated Prisma migrations",
+      "tags": ["prisma", "database"],
+      "paths": ["prisma/migrations"],
+      "body": "Change prisma/schema.prisma and run `npx prisma migrate dev --name <change>`. Editing an applied migration file changes its checksum and production deploys fail with a drift error."
+    },
+    {
+      "kind": "convention",
+      "title": "Error responses use problem+json (RFC 7807)",
+      "tags": ["api", "errors"],
+      "paths": ["src/lib/errors.ts"],
+      "body": "All 4xx/5xx responses are application/problem+json with type, title, status and detail. Throw HttpProblem from src/lib/errors.ts; the global error handler serialises it. Do not return ad-hoc {error: ...} objects."
+    },
+    {
+      "kind": "howto",
+      "title": "Deploy to production",
+      "tags": ["deploy", "ci"],
+      "paths": [".github/workflows/deploy.yml", "fly.toml"],
+      "body": "Merge to main. GitHub Actions builds the Docker image and runs flyctl deploy. Prisma migrations run as the Fly release command before new machines start; if a migration fails the release is aborted and the old version keeps serving."
+    },
+    {
+      "kind": "gotcha",
+      "title": "Shopping carts expire after 7 days",
+      "tags": ["cart", "redis"],
+      "paths": ["src/services/cart.ts"],
+      "body": "Carts live in Redis with a 7-day TTL that is refreshed on every change. Abandoned-cart emails depend on Redis keyspace notifications (notify-keyspace-events Ex); a Redis without that setting silently sends no emails."
+    },
+    {
+      "kind": "decision",
+      "title": "Products are soft-deleted",
+      "tags": ["catalog", "database"],
+      "paths": ["prisma/schema.prisma"],
+      "body": "Orders keep referencing products forever, so products are never hard-deleted. Deleting sets deleted_at; catalog queries filter deleted_at IS NULL through the repository layer."
+    },
+    {
+      "kind": "architecture",
+      "title": "Background jobs run on BullMQ",
+      "tags": ["jobs", "redis"],
+      "paths": ["src/worker.ts", "src/jobs"],
+      "body": "Queues: emails, webhook-retries and inventory-sync. Jobs are enqueued by services and processed by the separate worker process (src/worker.ts). Each job must be idempotent because BullMQ retries with exponential backoff."
+    },
+    {
+      "kind": "convention",
+      "title": "Feature flags come from environment-scoped config",
+      "tags": ["flags"],
+      "paths": ["src/flags.ts"],
+      "body": "Flags are defined in src/flags.ts with a default per environment (dev, staging, prod) and can be overridden with FLAG_<NAME>=on. Remove a flag and its dead branch within one release after it reaches 100%."
+    },
+    {
+      "kind": "gotcha",
+      "title": "Timestamps are UTC; reports use the store timezone",
+      "tags": ["time"],
+      "paths": ["src/reports"],
+      "body": "The database and API always use UTC. Only sales reports convert to the store's local timezone, using Luxon. Using new Date() for day boundaries in reports produces off-by-one-day totals."
+    },
+    {
+      "kind": "howto",
+      "title": "Add a new API endpoint",
+      "tags": ["api"],
+      "paths": ["src/routes", "src/app.ts"],
+      "body": "Create a route file in src/routes with a zod schema for params and body, put logic in a service, register the route plugin in src/app.ts, and add an integration test under test/routes."
+    },
+    {
+      "kind": "reference",
+      "title": "Rate limiting",
+      "tags": ["api", "security"],
+      "paths": ["src/plugins/rate-limit.ts"],
+      "body": "@fastify/rate-limit allows 100 requests per minute per IP, 1000 for authenticated admin tokens. Webhook routes are exempt because Stripe retries aggressively."
+    },
+    {
+      "kind": "state",
+      "title": "Checkout v2 rollout in progress",
+      "tags": ["checkout", "flags"],
+      "paths": ["src/services/checkout-v2.ts"],
+      "body": "The new checkout flow is behind the checkout_v2 flag, currently on for 25% of traffic in production. The old flow in src/services/checkout.ts is removed once v2 reaches 100% and a week passes without payment incidents."
+    },
+    {
+      "kind": "decision",
+      "title": "Inventory is reserved when checkout starts",
+      "tags": ["inventory", "checkout"],
+      "paths": ["src/services/inventory.ts"],
+      "body": "To prevent overselling, starting checkout reserves stock for 15 minutes. Reservations are released by the inventory-sync job if payment does not complete."
+    },
+    {
+      "kind": "gotcha",
+      "title": "TaxJar sandbox returns zero tax outside the US",
+      "tags": ["tax"],
+      "paths": ["src/services/tax.ts"],
+      "body": "In staging, TaxJar's sandbox returns 0 tax for non-US addresses, so EU checkout totals look wrong there but are correct in production."
+    },
+    {
+      "kind": "convention",
+      "title": "Commit messages follow Conventional Commits",
+      "tags": ["git"],
+      "paths": [".husky/commit-msg"],
+      "body": "feat:, fix:, chore:, refactor: prefixes are enforced by commitlint in a husky commit-msg hook. The changelog is generated from them on release."
+    },
+    {
+      "kind": "howto",
+      "title": "Seed local demo data",
+      "tags": ["database", "dev"],
+      "paths": ["prisma/seed.ts"],
+      "body": "Run `npm run db:seed` to create demo products, categories and an admin user admin@acme.test with password 'admin'. Seeding is idempotent."
+    },
+    {
+      "kind": "architecture",
+      "title": "Authentication: JWT access tokens and rotating refresh cookies",
+      "tags": ["auth", "security"],
+      "paths": ["src/services/auth.ts"],
+      "body": "Login returns a 15-minute JWT access token and sets a 30-day refresh token in an httpOnly cookie. Refresh tokens rotate on every use; reuse of an old refresh token revokes the whole session family."
+    },
+    {
+      "kind": "gotcha",
+      "title": "Order listing had N+1 queries",
+      "tags": ["performance", "prisma"],
+      "paths": ["src/repositories/orders.ts"],
+      "body": "Loading order items per order made the orders page issue hundreds of SQL queries. Use Prisma include for items and products in one query. Check with DEBUG=prisma:query."
+    },
+    {
+      "kind": "reference",
+      "title": "Logging and request ids",
+      "tags": ["observability"],
+      "paths": ["src/plugins/logging.ts"],
+      "body": "pino writes JSON logs. Every request gets an id from the x-request-id header (or a generated one) that is propagated to jobs and to Sentry, so one id finds all logs for a request."
+    }
+  ],
+  "queries": [
+    { "category": "paraphrase", "query": "how do I release a new version?", "expect": ["Deploy to production"] },
+    {
+      "category": "paraphrase",
+      "query": "why are payment signature checks failing?",
+      "expect": ["Stripe webhooks need the raw request body"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "how are prices represented?",
+      "expect": ["Money is stored as integer cents"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "why did we pick this web framework",
+      "expect": ["Fastify chosen over Express"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "how long do shopping carts last?",
+      "expect": ["Shopping carts expire after 7 days"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "where do asynchronous tasks get processed",
+      "expect": ["Background jobs run on BullMQ"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "how does login work",
+      "expect": ["Authentication: JWT access tokens and rotating refresh cookies"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "how to get sample products into my local database",
+      "expect": ["Seed local demo data"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "can I remove a product permanently?",
+      "expect": ["Products are soft-deleted"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "prevent selling more items than we have in stock",
+      "expect": ["Inventory is reserved when checkout starts"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "what format should API error responses have",
+      "expect": ["Error responses use problem+json (RFC 7807)"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "rules for writing git commit messages",
+      "expect": ["Commit messages follow Conventional Commits"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "the orders page is slow and runs too many SQL queries",
+      "expect": ["Order listing had N+1 queries"]
+    },
+    { "category": "paraphrase", "query": "steps to add a route to the API", "expect": ["Add a new API endpoint"] },
+    {
+      "category": "paraphrase",
+      "query": "is the new checkout fully launched?",
+      "expect": ["Checkout v2 rollout in progress"]
+    },
+    {
+      "category": "paraphrase",
+      "query": "daily sales totals are off by one day",
+      "expect": ["Timestamps are UTC; reports use the store timezone"]
+    },
+    { "category": "identifier", "query": "STRIPE_WEBHOOK_SECRET", "expect": ["Environment variables"] },
+    { "category": "identifier", "query": "TEST_DATABASE_URL", "expect": ["Run the test suite locally"] },
+    { "category": "identifier", "query": "x-request-id", "expect": ["Logging and request ids"] },
+    { "category": "identifier", "query": "checkout_v2", "expect": ["Checkout v2 rollout in progress"] },
+    {
+      "category": "identifier",
+      "query": "src/worker.ts",
+      "expect": ["Background jobs run on BullMQ", "Acme Shop API overview"]
+    },
+    { "category": "identifier", "query": "@fastify/rate-limit", "expect": ["Rate limiting"] },
+    { "category": "identifier", "query": "db:seed", "expect": ["Seed local demo data"] },
+    { "category": "identifier", "query": "deleted_at", "expect": ["Products are soft-deleted"] },
+    { "category": "identifier", "query": "DEBUG=prisma:query", "expect": ["Order listing had N+1 queries"] },
+    {
+      "category": "cross-lingual",
+      "query": "як розгорнути нову версію в продакшн?",
+      "expect": ["Deploy to production"]
+    },
+    {
+      "category": "cross-lingual",
+      "query": "чому не проходить перевірка підпису вебхука Stripe?",
+      "expect": ["Stripe webhooks need the raw request body"]
+    },
+    { "category": "cross-lingual", "query": "як запустити тести локально?", "expect": ["Run the test suite locally"] },
+    {
+      "category": "cross-lingual",
+      "query": "Wie werden Geldbeträge gespeichert?",
+      "expect": ["Money is stored as integer cents"]
+    },
+    {
+      "category": "cross-lingual",
+      "query": "¿Cuánto tiempo dura un carrito de compras?",
+      "expect": ["Shopping carts expire after 7 days"]
+    },
+    {
+      "category": "cross-lingual",
+      "query": "ログイン認証の仕組みは？",
+      "expect": ["Authentication: JWT access tokens and rotating refresh cookies"]
+    },
+    {
+      "category": "cross-lingual",
+      "query": "Comment ajouter un nouvel endpoint à l'API ?",
+      "expect": ["Add a new API endpoint"]
+    },
+    { "category": "negative", "query": "how do we train the recommendation model", "expect": [] },
+    { "category": "negative", "query": "what is the office wifi password", "expect": [] },
+    { "category": "negative", "query": "kubernetes helm chart values for the cluster", "expect": [] }
+  ]
+}

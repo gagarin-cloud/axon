@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: axon
+          POSTGRES_PASSWORD: axon
+          POSTGRES_DB: axon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U axon"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://axon:axon@localhost:5432/axon
+      # onnxruntime-node fetches CUDA binaries on linux/x64 by default; axon runs on CPU.
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      # Tests use a deterministic fake embedder; the real model is exercised by `npm run eval` locally.
+      - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Only the build stage: the final stage bakes in the ~600 MB embedding model, which is
+      # too slow to download on every run. This still catches a broken Dockerfile or `npm ci`.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: build
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

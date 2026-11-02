@@ -1,0 +1,32 @@
+# A bearer-token gateway in front of axon, which has no auth of its own.
+#
+# AUTH_TOKEN      the token clients send as `Authorization: Bearer <token>`
+# AXON_UPSTREAM   where axon answers, e.g. http://server:7717 (its private address)
+#
+# Both are read once, when Caddy starts: restart the gateway to pick up a new token.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	# Readiness, unauthenticated: answers only if axon and its database do.
+	handle /healthz {
+		reverse_proxy {$AXON_UPSTREAM}
+	}
+
+	@authorized header Authorization "Bearer {$AUTH_TOKEN}"
+	handle @authorized {
+		# Never pass the gateway's credential on to axon or into its logs.
+		request_header -Authorization
+		reverse_proxy {$AXON_UPSTREAM} {
+			# Axon checks Host on loopback binds; hand it the upstream's own name.
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	handle {
+		header WWW-Authenticate "Bearer"
+		respond "Unauthorized" 401
+	}
+}

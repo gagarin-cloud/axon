@@ -1,0 +1,129 @@
+name: publish
+
+# Every push to main builds axon's images and publishes them to Docker Hub:
+#
+#   gagarincloud/axon           the server, with the embedding model baked in
+#   gagarincloud/axon-gateway   the bearer-token gateway (deploy/gagarin/gateway)
+#
+# Each gets :sha-<commit>, which is never overwritten, and :latest. Each gets a
+# signed build-provenance attestation as well, so anyone can check that an image
+# was built by this workflow from a given commit of this repository:
+#
+#   gh attestation verify oci://docker.io/gagarincloud/axon@<digest> --repo gagarin-cloud/axon
+#
+# This workflow deploys nothing. Whoever runs axon (gagarin included) picks an
+# image by digest and rolls it out themselves.
+#
+# ─── setup ──────────────────────────────────────────────────────────────────
+#
+# A `publish` environment whose deployment branch rule allows `main` only, holding:
+#
+#   vars.DOCKERHUB_NAMESPACE   the Docker Hub organisation: gagarincloud
+#   secrets.DOCKERHUB_USERNAME the account (or organisation) the token belongs to
+#   secrets.DOCKERHUB_TOKEN    an organisation access token limited to the two
+#                              repositories above, with image push and pull and
+#                              nothing else. No delete, no other repositories.
+#
+# A job on any other ref, a pull request from a fork included, cannot read them,
+# and this workflow never runs on `pull_request` or `pull_request_target`. So no
+# unmerged code runs beside the token. What a merge to main can do, it can do to
+# the published images: keep branch protection on main.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # sign the provenance attestations with GitHub's OIDC identity
+  attestations: write # and store them with GitHub, beside the commit
+
+# One publish at a time. A queued one waits rather than cancels, so :latest
+# always ends on the newest commit.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: ${{ matrix.name }} → Docker Hub
+    runs-on: ubuntu-latest
+    environment:
+      name: publish
+    timeout-minutes: 45
+    strategy:
+      # The two images are independent: a failure in one must not cancel the other.
+      fail-fast: false
+      matrix:
+        include:
+          - name: axon
+            context: .
+          - name: axon-gateway
+            context: deploy/gagarin/gateway
+    steps:
+      - name: Name the image
+        env:
+          NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+          NAME: ${{ matrix.name }}
+        run: |
+          test -n "$NAMESPACE" || { echo "vars.DOCKERHUB_NAMESPACE is not set on the publish environment" >&2; exit 1; }
+          echo "IMAGE=docker.io/$NAMESPACE/$NAME" >> "$GITHUB_ENV"
+
+      # Actions are pinned by commit: a moved tag must not change what runs
+      # beside the registry token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      # amd64 because that is what Gagarin's nodes are. No buildx provenance or
+      # SBOM, so the tag resolves to a plain manifest, and the digest attested
+      # below is the one a kubelet pulls. An OCI index digest looks the same but
+      # names a different object.
+      #
+      # :sha-<commit> is immutable. If it is already there (a re-run, or a
+      # workflow_dispatch on the same commit), nothing is rebuilt or replaced.
+      - name: Build and push
+        id: push
+        env:
+          CONTEXT: ${{ matrix.context }}
+        run: |
+          TAG="sha-${GITHUB_SHA::12}"
+          if docker buildx imagetools inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
+            echo "$IMAGE:$TAG is already published; tags are immutable, so it is not rebuilt"
+          else
+            docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+              --cache-from "type=gha,scope=$IMAGE" --cache-to "type=gha,scope=$IMAGE,mode=max" \
+              --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --label "org.opencontainers.image.licenses=MIT" \
+              -t "$IMAGE:$TAG" --push "$CONTEXT"
+          fi
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          case "$DIGEST" in sha256:*) ;; *) echo "no digest for $IMAGE:$TAG" >&2; exit 1 ;; esac
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE@$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $IMAGE"
+            echo
+            echo '```'
+            echo "$IMAGE@$DIGEST"
+            echo "$IMAGE:$TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Signed with this workflow's identity and stored with GitHub, not pushed
+      # to the registry, so the repository holds nothing but the image itself.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: false

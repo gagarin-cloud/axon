@@ -1,0 +1,19 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: axon
+      POSTGRES_PASSWORD: axon
+      POSTGRES_DB: axon
+    ports:
+      - "54329:5432"
+    volumes:
+      - axon-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axon"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  axon-db:

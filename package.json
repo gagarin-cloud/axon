@@ -1,0 +1,46 @@
+{
+  "name": "axon",
+  "version": "0.1.0",
+  "description": "Per-project memory for AI agents: budgeted cold-start briefings, hybrid semantic search and linked memories, served over MCP.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "axon": "dist/cli.js"
+  },
+  "scripts": {
+    "axon": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "eval": "tsx src/cli.ts eval"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@huggingface/transformers": "^4.3.0",
+    "@modelcontextprotocol/hono": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "franc-min": "^6.2.0",
+    "gpt-tokenizer": "^4.0.0",
+    "hono": "^4.13.8",
+    "pgvector": "^0.3.0",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^26.6.1",
+    "@vitest/coverage-v8": "^5.0.5",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
