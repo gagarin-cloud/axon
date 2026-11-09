@@ -1,0 +1,98 @@
+name: gagarin
+
+# Every push to main that changes what goes into the image ships axon into the
+# gagarin account's own `axon` project and snaps a new version of the `axon`
+# recipe from it, so the one-click deploy behind the README's badge always
+# installs the newest commit.
+#
+# The recipe is DEPLOY.md's mode A: the server (size m, private), a postgres
+# with pgvector called `database`, and an external called `axon` whose
+# ENCRYPTION_KEY and MAX_MEMORIES become the installer's inputs. Its values in
+# the gagarin project are placeholders; a recipe carries the names, never the
+# values.
+#
+# The image is built here from source with `gg build`, which targets the
+# platform Gagarin's nodes run, rather than copied from Docker Hub. The Docker
+# Hub images (publish.yml) are unchanged and remain what DEPLOY.md copies in.
+#
+# ─── setup ──────────────────────────────────────────────────────────────────
+#
+# The project was created once by hand, with everything but the server:
+#
+#   gg init axon
+#   gg resource add axon/database postgres --storage 10 --ext vector
+#   gg resource add axon/axon external --env-file .env.axon
+#
+# This workflow only ships the server and snaps; it creates and removes nothing
+# else. It needs one secret on the `publish` environment (main only, see
+# publish.yml), a credential minted for this pipeline alone:
+#
+#   gh secret set GAGARIN_TOKEN --env publish --repo gagarin-cloud/axon \
+#     --body "$(gg creds create --name 'github actions: gagarin-cloud/axon')"
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "test/**"
+      - "LICENSE"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time, and a queued one waits rather than cancels, so the newest
+# commit is the last one shipped and snapped.
+concurrency:
+  group: gagarin
+  cancel-in-progress: false
+
+jobs:
+  ship-and-snap:
+    runs-on: ubuntu-latest
+    environment:
+      name: publish
+    timeout-minutes: 45
+    # The credential belongs to this job alone, not to any job added later.
+    env:
+      GAGARIN_TOKEN: ${{ secrets.GAGARIN_TOKEN }}
+      PROJECT: axon
+      # A released gg, not whatever is newest: a moved release must not change
+      # what runs beside the credential. Bump it on purpose.
+      GAGARIN_INSTALL_VERSION: v0.61.0
+    steps:
+      # Pinned by commit, as in publish.yml.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install gg
+        run: |
+          curl -fsSL https://gagarin.cloud/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Log docker in to the Gagarin registry
+        run: gg registry login
+
+      # About 2 GB: the embedding model is baked in, so a pod starts offline.
+      - name: Build and push the server image
+        run: gg build "$PROJECT/axon:${{ github.sha }}" --push
+
+      # Size m: the model takes most of a gigabyte, and size s is OOM-killed.
+      # A deploy replaces the environment, and the server's whole environment
+      # comes from its two dependencies, so there is nothing to restate.
+      - name: Release
+        run: gg deploy "$PROJECT/server:7717" "axon:${{ github.sha }}" --size m --deps database --deps axon
+
+      - name: Say what Gagarin is doing
+        run: gg status "$PROJECT"
+
+      # No --version: the platform sets the floor, and a new digest is a patch.
+      - name: Snap a recipe version
+        run: |
+          gg recipe snap "$PROJECT" \
+            --source "https://github.com/gagarin-cloud/axon" \
+            --notes "axon@${{ github.sha }}. Private: nothing outside the project can reach it. Deploy your own service into the same project and run gg deps add PROJECT/YOUR-SERVICE server, then call http://server:7717/mcp or /v1. The axon input is ENCRYPTION_KEY (openssl rand -base64 32; keep it, memories cannot be read without it) and MAX_MEMORIES (e.g. 5000). DEPLOY.md adds a bearer-token gateway for a public address."
