@@ -1,5 +1,7 @@
 # axon
 
+[![Deploy to Gagarin Cloud](https://my.gagarin.cloud/deploy/7h9xs7d3/badge.svg)](https://my.gagarin.cloud/deploy/7h9xs7d3)
+
 Per-project memory for AI agents. Axon stores small, durable facts about a codebase — its overview,
 architecture, decisions, conventions, gotchas — and gives them back as cheaply as possible:
 
