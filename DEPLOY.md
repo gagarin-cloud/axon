@@ -76,7 +76,7 @@ gg resource add axon/axon external --env-file .env.axon
 # 3. Copy the image in, then run it, holding both. Migrations run on start.
 AXON_TAG=sha-<commit>                      # see "The images" above
 gg registry copy axon/axon:$AXON_TAG docker.io/gagarincloud/axon:$AXON_TAG
-gg deploy axon/server:7717 axon:$AXON_TAG --size m --deps database,axon
+gg deploy axon/server:7717 axon:$AXON_TAG --size m --deps database --deps axon
 
 # 4. Is it up?
 gg status axon
@@ -107,7 +107,7 @@ gg resource add axon/auth external --env-file .env.auth
 # 2. The gateway, which may reach the token and axon.
 gg registry copy axon/axon-gateway:$AXON_TAG docker.io/gagarincloud/axon-gateway:$AXON_TAG
 gg deploy axon/gateway:8080 axon-gateway:$AXON_TAG \
-  --env AXON_UPSTREAM=http://server:7717 --deps auth,server
+  --env AXON_UPSTREAM=http://server:7717 --deps auth --deps server
 
 # 3. A public HTTPS address, for the gateway only.
 gg domain add axon/gateway
